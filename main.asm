@@ -1,0 +1,351 @@
+.segment      "ZEROPAGE"
+tempaddr:     .res 2
+tempaddr2:    .res 2      
+
+.segment "CODE"
+; kernal routines
+CHROUT = $ffd2
+GETIN  = $ffe4
+PLOT   = $fff0
+READST = $ff8a
+
+; char codes
+CHR_CLR_HOME = 147
+
+; color codes
+COLOR_BLACK   = 0
+COLOR_WHITE   = 1
+COLOR_RED     = 2
+COLOR_CYAN    = 3
+COLOR_PURPLE  = 4
+COLOR_GREEN   = 5
+COLOR_BLUE    = 6
+COLOR_YELLOW  = 7
+
+PLAYER_CHAR   = 81
+PLAYER_COLOR  = 6
+
+; zero page variables
+
+cur_color   = $0286  ; color for CHROUT
+
+;*****************************************************************
+; start prg
+;*****************************************************************
+
+  .byt $01,$10 ; PRG file header (starting address of the program)
+
+  .org $1001   ; start of basic program
+
+;*****************************************************************
+; basic stub
+;*****************************************************************
+
+  ; stub basic program
+  ;
+  ; 2015 SYS4109
+  ;
+  .word bend            ; next line link
+  .word 2015            ; line number
+  .byte $9e,52,49,48,57 ; sys4109 (4096+13 = bytes of basic program)
+  .byte 0               ; end of line
+  bend:  .word 0          ; end of program
+
+;*****************************************************************
+; main program
+;*****************************************************************
+
+start:
+  jsr clear_screen  ; jump save return -> clear_screen
+  jsr grass_line
+  
+  lda #COLOR_BLUE
+  sta cur_color
+gameloop:
+  jsr check_input
+  jsr score_line
+  jmp gameloop
+eof:
+  rts      
+  
+clear_screen:
+  lda #CHR_CLR_HOME 
+  jsr CHROUT        
+  rts               
+  
+
+grass_line:
+    ldx #0  ; row index
+
+grass_row_loop:
+    ; Get screen address
+    lda row_lut_lo,x
+    sta tempaddr
+    lda row_lut_hi,x
+    clc
+    adc #>$1E00        ; Add high byte of screen base
+    sta tempaddr+1
+
+    lda row_lut_lo,x
+    sta tempaddr2
+    lda row_lut_hi,x
+    clc
+    adc #>$9600        ; Add high byte of color base
+    sta tempaddr2+1
+
+    ldy #0
+fill_row:
+    lda #102
+    sta (tempaddr),y
+    lda #COLOR_GREEN
+    sta (tempaddr2),y
+    iny
+    cpy #22
+    bne fill_row
+
+    inx
+    cpx #18
+    bne grass_row_loop
+
+    rts
+
+score_line:
+  lda score
+  jsr bin_to_ascii
+  ldx #0
+scloop:
+  ;last char in line
+  lda scoremsg,x
+  beq sexit
+
+  sta $1FB8,x
+  lda #COLOR_RED
+  sta $97B8,x
+
+  inx            
+  jmp scloop
+sexit:
+  
+  lda digits
+  sta $1FB8,x
+  lda #COLOR_RED
+  sta $97B8,x
+
+  lda digits+1
+  sta $1FB9,x
+  lda #COLOR_RED
+  sta $97B9,x
+
+  lda digits+2
+  sta $1FBA,x
+  lda #COLOR_RED
+  sta $97BA,x
+  
+  ;reset screenptr
+  lda #0
+  sta screenptr
+
+  ;done
+  rts
+
+
+
+;x=dir 0=left 1=right 2=up 3=down
+check_input:
+  jsr GETIN       ; get character from buffer (0 if none)
+
+  cmp #0
+  beq no_key      ; nothing pressed
+
+  cmp #'W'
+  bne check_a
+  ; w is pressed
+  ; do something
+  ldx #2
+  jsr move_player
+
+  jmp no_key
+
+check_a:
+  cmp #'A'
+  bne check_s
+  ; a is pressed
+  ; do something
+  ldx #0
+  jsr move_player
+
+  jmp no_key
+
+check_s:
+  cmp #'S'
+  bne check_d
+  ; s is pressed
+  ; do something
+  ldx #3
+  jsr move_player
+  jmp no_key
+
+check_d:
+  cmp #'D'
+  bne no_key
+  ; d is pressed
+  ; do something
+  ldx #1
+  jsr move_player
+
+no_key:
+  rts
+
+;x=dir 0=left 1=right 2=up 3=down ;destroys temp4
+move_player:
+  stx temp4
+  ;param for draw_player to do a clear
+  ldx #1
+  jsr draw_player
+  ldx temp4
+checkl:
+  cpx #0
+  bne checkr
+  ;go left
+  ldx player_x
+  dex
+  stx player_x
+  jmp nomove
+checkr:
+  cpx #1
+  bne checku
+  ;go right
+  ldx player_x
+  inx
+  stx player_x
+  jmp nomove
+checku:
+  cpx #2
+  bne checkd
+  ;go up
+  ldx player_y
+  dex
+  stx player_y
+  jmp nomove
+checkd:
+  cpx #3
+  bne nomove
+  ;go up
+  ldx player_y
+  inx
+  stx player_y
+nomove:
+  ;param to draw reg player
+  ldx #0
+  jsr draw_player
+  rts
+
+; x = 1 → clear mode, x = 0 → draw mode
+; x = 1 → clear old spot, x = 0 → draw new spot & maybe score
+draw_player:
+    stx temp2             ; save mode (0=draw, 1=clear)
+    
+    ; compute screen pointer to $1E00 + y * 22 + x
+    ldx player_y
+    lda row_lut_lo,x
+    sta tempaddr
+    lda row_lut_hi,x
+    clc
+    adc #$1E
+    sta tempaddr+1
+    ldy player_x
+
+    ; if drawing
+    ldx temp2
+    cpx #0
+    bne dp_clear
+
+    ; check if tile underneath is grass (#102)
+    lda (tempaddr),y
+    cmp #102
+    bne dp_nograss
+    inc score
+dp_nograss:
+    lda #PLAYER_CHAR
+    sta (tempaddr),y
+    rts
+
+dp_clear:
+    lda #32
+    sta (tempaddr),y
+    rts
+
+
+;handy bin to ascii not written by me
+bin_to_ascii:
+  sta temp
+  ldx #0          ; hundreds
+hund_loop:
+  lda temp
+  cmp #100
+  bcc tens_loop
+  sbc #100
+  sta temp
+  inx
+  jmp hund_loop
+
+tens_loop:
+  stx digits
+  ldx #0          ; tens
+ten_loop:
+  lda temp
+  cmp #10
+  bcc ones
+  sbc #10
+  sta temp
+  inx
+  jmp ten_loop
+
+ones:
+  stx digits+1
+  lda temp
+  sta digits+2
+
+  ; convert to ASCII
+  lda digits
+  clc
+  adc #$30
+  sta digits
+  lda digits+1
+  adc #$30
+  sta digits+1
+  lda digits+2
+  adc #$30
+  sta digits+2
+
+  rts
+  
+
+
+;*****************************************************************
+; data
+;*****************************************************************
+player_half: .byte 0
+player_x:    .byte 0
+player_y:    .byte 0
+temp:         .byte 0
+temp2:        .byte 0
+temp3:        .byte 0
+temp4:        .byte 0
+screenptr:    .byte 0
+score:        .byte 0
+digits:       .res 3
+;text
+;                 s  c  o  r  e  : 
+scoremsg:   .byte 19,3 ,15,18,5 ,58,32,0
+
+; Each row is 22 characters. This is for 12 rows.
+row_lut_lo:
+  .byte <(0*22), <(1*22), <(2*22), <(3*22), <(4*22), <(5*22)
+  .byte <(6*22), <(7*22), <(8*22), <(9*22), <(10*22), <(11*22)
+  .byte <(12*22), <(13*22), <(14*22), <(15*22), <(16*22), <(17*22)
+
+row_lut_hi:
+  .byte >(0*22), >(1*22), >(2*22), >(3*22), >(4*22), >(5*22)
+  .byte >(6*22), >(7*22), >(8*22), >(9*22), >(10*22), >(11*22)
+  .byte >(12*22), >(13*22), >(14*22), >(15*22), >(16*22), >(17*22)
