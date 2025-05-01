@@ -58,16 +58,36 @@ cur_color   = $0286  ; color for CHROUT
 start:
   jsr clear_screen  ; jump save return -> clear_screen
   jsr grass_line
+
+  ldx #255
+  stx frame_time
   
   lda #COLOR_BLUE
   sta cur_color
 gameloop:
+  
   jsr check_input
+  jsr move_player
   jsr score_line
+
+  jsr frame
+
   jmp gameloop
+
 eof:
   rts      
   
+frame:
+fts:
+  ldx frame_timer
+  dex
+  stx frame_timer
+  bne noftr
+  ldx frame_time
+  stx frame_timer
+noftr:
+  rts
+
 clear_screen:
   lda #CHR_CLR_HOME 
   jsr CHROUT        
@@ -110,7 +130,7 @@ fill_row:
     rts
 
 score_line:
-  lda score
+  lda frame_timer
   jsr bin_to_ascii
   ldx #0
 scloop:
@@ -140,10 +160,6 @@ sexit:
   sta $1FBA,x
   lda #COLOR_RED
   sta $97BA,x
-  
-  ;reset screenptr
-  lda #0
-  sta screenptr
 
   ;done
   rts
@@ -152,17 +168,19 @@ sexit:
 
 ;x=dir 0=left 1=right 2=up 3=down
 check_input:
-  jsr GETIN       ; get character from buffer (0 if none)
+  ; get character from buffer (0 if none)
+  jsr GETIN       
 
   cmp #0
-  beq no_key      ; nothing pressed
+   ; nothing pressed
+  beq no_key      
+ 
 
   cmp #'W'
   bne check_a
   ; w is pressed
-  ; do something
   ldx #2
-  jsr move_player
+  stx player_dir
 
   jmp no_key
 
@@ -170,9 +188,8 @@ check_a:
   cmp #'A'
   bne check_s
   ; a is pressed
-  ; do something
   ldx #0
-  jsr move_player
+  stx player_dir
 
   jmp no_key
 
@@ -180,24 +197,28 @@ check_s:
   cmp #'S'
   bne check_d
   ; s is pressed
-  ; do something
   ldx #3
-  jsr move_player
+  stx player_dir
   jmp no_key
 
 check_d:
   cmp #'D'
   bne no_key
   ; d is pressed
-  ; do something
   ldx #1
-  jsr move_player
+  stx player_dir
 
 no_key:
   rts
 
 ;x=dir 0=left 1=right 2=up 3=down ;destroys temp4
 move_player:
+  ldx frame_timer
+  cpx #1
+  beq domoveplayer
+  rts
+domoveplayer:
+  ldx player_dir
   stx temp4
   ;param for draw_player to do a clear
   ldx #1
@@ -241,10 +262,9 @@ nomove:
   rts
 
 ; x = 1 → clear mode, x = 0 → draw mode
-; x = 1 → clear old spot, x = 0 → draw new spot & maybe score
 draw_player:
-    stx temp2             ; save mode (0=draw, 1=clear)
-    
+    ; save mode (0=draw, 1=clear)
+    stx temp2             
     ; compute screen pointer to $1E00 + y * 22 + x
     ldx player_y
     lda row_lut_lo,x
@@ -269,17 +289,15 @@ dp_nograss:
     lda #PLAYER_CHAR
     sta (tempaddr),y
     rts
-
 dp_clear:
     lda #32
     sta (tempaddr),y
     rts
 
-
 ;handy bin to ascii not written by me
 bin_to_ascii:
   sta temp
-  ldx #0          ; hundreds
+  ldx #0
 hund_loop:
   lda temp
   cmp #100
@@ -288,10 +306,9 @@ hund_loop:
   sta temp
   inx
   jmp hund_loop
-
 tens_loop:
   stx digits
-  ldx #0          ; tens
+  ldx #0
 ten_loop:
   lda temp
   cmp #10
@@ -300,12 +317,10 @@ ten_loop:
   sta temp
   inx
   jmp ten_loop
-
 ones:
   stx digits+1
   lda temp
   sta digits+2
-
   ; convert to ASCII
   lda digits
   clc
@@ -317,7 +332,6 @@ ones:
   lda digits+2
   adc #$30
   sta digits+2
-
   rts
   
 
@@ -325,21 +339,23 @@ ones:
 ;*****************************************************************
 ; data
 ;*****************************************************************
-player_half: .byte 0
-player_x:    .byte 0
-player_y:    .byte 0
+player_x:     .byte 0
+player_y:     .byte 0
+player_dir:   .byte 0
+frame_timer:  .byte 0
+frame_time:   .byte 0
 temp:         .byte 0
 temp2:        .byte 0
 temp3:        .byte 0
 temp4:        .byte 0
-screenptr:    .byte 0
 score:        .byte 0
 digits:       .res 3
+holyhell:     .res 2000
 ;text
 ;                 s  c  o  r  e  : 
 scoremsg:   .byte 19,3 ,15,18,5 ,58,32,0
 
-; Each row is 22 characters. This is for 12 rows.
+;lookup tables. high/low byte for screen coords
 row_lut_lo:
   .byte <(0*22), <(1*22), <(2*22), <(3*22), <(4*22), <(5*22)
   .byte <(6*22), <(7*22), <(8*22), <(9*22), <(10*22), <(11*22)
