@@ -1,6 +1,7 @@
 .segment      "ZEROPAGE"
 tempaddr:     .res 2
 tempaddr2:    .res 2      
+rand_seed:    .res 1
 
 .segment "CODE"
 ; kernal routines
@@ -22,8 +23,13 @@ COLOR_GREEN   = 5
 COLOR_BLUE    = 6
 COLOR_YELLOW  = 7
 
+GRASS_CHAR = 102
+
 PLAYER_CHAR   = 81
 PLAYER_COLOR  = 6
+
+ROCK_COLOR   = 6
+ROCK_CHAR    = 88
 
 ; zero page variables
 
@@ -57,14 +63,32 @@ cur_color   = $0286  ; color for CHROUT
 
 start:
   jsr clear_screen  ; jump save return -> clear_screen
+  jsr mm
+
   jsr grass_line
 
   ldx #255
   stx frame_time
+
+  lda #1
+  sta player_x
+  sta player_y
+
+  lda #0
+  sta score
+  sta grass_cut
+
+
   
   lda #COLOR_BLUE
   sta cur_color
+
+  lda #69
+  sta player_dir
 gameloop:
+  ; seed rand with low byte of VIA time
+  lda $9004       
+  sta rand_seed
   
   jsr check_input
   jsr move_player
@@ -88,6 +112,29 @@ fts:
 noftr:
   rts
 
+
+mm:
+mmtext:
+  ;last char in line
+  lda mmmsg,x
+  beq mml
+
+  sta $1FB8,x
+  lda #COLOR_RED
+  sta $97B8,x
+
+  inx            
+  jmp mmtext
+mml:
+  ; seed rand with low byte of VIA time
+  lda $9004       
+  sta rand_seed
+  jsr GETIN
+  cmp #0
+  beq mml    
+
+
+
 clear_screen:
   lda #CHR_CLR_HOME 
   jsr CHROUT        
@@ -98,27 +145,61 @@ grass_line:
     ldx #0  ; row index
 
 grass_row_loop:
+
+    ; seed rand with low byte of VIA time
+    lda $9004       
+    sta rand_seed
+
+
     ; Get screen address
     lda row_lut_lo,x
     sta tempaddr
     lda row_lut_hi,x
     clc
-    adc #>$1E00        ; Add high byte of screen base
+    adc #>$1E00
     sta tempaddr+1
 
     lda row_lut_lo,x
     sta tempaddr2
     lda row_lut_hi,x
     clc
-    adc #>$9600        ; Add high byte of color base
+    adc #>$9600
     sta tempaddr2+1
 
     ldy #0
 fill_row:
-    lda #102
+
+    ;;if we on the edges, just always do a rock
+    txa
+    cmp #0
+    beq rockme
+    cmp #17
+    beq rockme
+    tya
+    cmp #0
+    beq rockme
+    tya
+    cmp #21
+    beq rockme
+
+    jsr rand8
+    lda rand_seed
+    cmp #10
+    bcs not_rock
+rockme:
+    lda #ROCK_CHAR
+    sta (tempaddr),y
+    lda #ROCK_COLOR
+    sta (tempaddr2),y
+    jmp next_tile
+
+not_rock:
+    lda #GRASS_CHAR
     sta (tempaddr),y
     lda #COLOR_GREEN
     sta (tempaddr2),y
+
+next_tile:
     iny
     cpy #22
     bne fill_row
@@ -129,8 +210,10 @@ fill_row:
 
     rts
 
+
+
 score_line:
-  lda frame_timer
+  lda score
   jsr bin_to_ascii
   ldx #0
 scloop:
@@ -280,10 +363,21 @@ draw_player:
     cpx #0
     bne dp_clear
 
-    ; check if tile underneath is grass (#102)
+    ; check if tile underneath is pain
     lda (tempaddr),y
-    cmp #102
+    cmp #ROCK_CHAR
+    beq pain
+
+    ; check if tile underneath is grass 
+    lda (tempaddr),y
+    cmp #GRASS_CHAR
     bne dp_nograss
+    inc grass_cut
+    lda grass_cut
+    cmp #25
+    bne dp_nograss
+    lda #0
+    sta grass_cut
     inc score
 dp_nograss:
     lda #PLAYER_CHAR
@@ -293,6 +387,8 @@ dp_clear:
     lda #32
     sta (tempaddr),y
     rts
+pain:
+  jmp pain
 
 ;handy bin to ascii not written by me
 bin_to_ascii:
@@ -333,6 +429,20 @@ ones:
   adc #$30
   sta digits+2
   rts
+
+rand8:
+    lda rand_seed
+    ; LCG: X(n+1) = (A * Xn + C) mod 256
+    ; Using A=17, C=23 for quick demo (parameters can be tuned)
+    clc
+    asl         ; multiply by 2
+    asl         ; multiply by 4
+    asl         ; multiply by 8
+    asl         ; multiply by 16
+    adc rand_seed  ; rand_seed * 17
+    adc #23        ; + 23
+    sta rand_seed
+    rts
   
 
 
@@ -349,11 +459,14 @@ temp2:        .byte 0
 temp3:        .byte 0
 temp4:        .byte 0
 score:        .byte 0
+grass_cut:    .byte 0
 digits:       .res 3
 holyhell:     .res 2000
 ;text
 ;                 s  c  o  r  e  : 
 scoremsg:   .byte 19,3 ,15,18,5 ,58,32,0
+;                 p  r  e s  s     a n  y     k  e y     t  o     s  t  a r  t
+mmmsg:      .byte 16,18,5,19,19,32,1,14,25,32,11,5,25,32,20,15,32,19,20,1,18,20,0
 
 ;lookup tables. high/low byte for screen coords
 row_lut_lo:
