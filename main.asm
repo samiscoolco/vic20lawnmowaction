@@ -30,6 +30,7 @@ PLAYER_COLOR  = 6
 
 ROCK_COLOR   = 6
 ROCK_CHAR    = 88
+BARN_CHAR    = 35
 
 ; zero page variables
 
@@ -62,9 +63,12 @@ cur_color   = $0286  ; color for CHROUT
 ;*****************************************************************
 
 start:
-  jsr clear_screen  ; jump save return -> clear_screen
+  jsr clear_screen
   jsr mm
-
+restart:
+  jsr clear_screen
+  jsr mmshop
+  jsr clear_screen
   jsr grass_line
 
   ldx #255
@@ -112,6 +116,43 @@ fts:
 noftr:
   rts
 
+mmshop:
+  ldx #0
+mmshoptext:
+  ;last char in line
+  lda mmmsg,x
+  beq mmshoptext1
+
+  sta $1FB8,x
+  lda #COLOR_BLUE
+  sta $97B8,x
+
+  inx            
+  jmp mmshoptext
+mmshoptext1:
+  ldx#0
+mmshoptext2:
+  ;last char in line
+  lda shopmsg,x
+  beq mmshopl
+
+  sta $1E00,x
+  lda #COLOR_BLUE
+  sta $9600,x
+
+  inx            
+  jmp mmshoptext2
+mmshopl:
+  ; seed rand with low byte of VIA time
+  lda $9004       
+  sta rand_seed
+  jsr GETIN
+  cmp #0
+  beq mmshopl
+  rts 
+
+
+
 
 mm:
 mmtext:
@@ -132,7 +173,7 @@ mml:
   jsr GETIN
   cmp #0
   beq mml    
-
+  rts
 
 
 clear_screen:
@@ -168,6 +209,20 @@ grass_row_loop:
 
     ldy #0
 fill_row:
+    ;; check for exit squre
+    txa
+    cmp #0
+    bne not_start
+    tya
+    cmp#1
+    bne not_start
+    lda #BARN_CHAR
+    sta (tempaddr),y
+    lda #COLOR_RED
+    sta (tempaddr2),y
+    jmp next_tile
+
+not_start:
 
     ;;if we on the edges, just always do a rock
     txa
@@ -368,6 +423,11 @@ draw_player:
     cmp #ROCK_CHAR
     beq pain
 
+    ; check if tile underneath is pain
+    lda (tempaddr),y
+    cmp #BARN_CHAR
+    beq restartme
+
     ; check if tile underneath is grass 
     lda (tempaddr),y
     cmp #GRASS_CHAR
@@ -389,6 +449,8 @@ dp_clear:
     rts
 pain:
   jmp pain
+restartme:
+  jmp restart
 
 ;handy bin to ascii not written by me
 bin_to_ascii:
@@ -463,6 +525,8 @@ grass_cut:    .byte 0
 digits:       .res 3
 holyhell:     .res 2000
 ;text
+;                 s  h  o p
+shopmsg:    .byte 19,8,15,16,0
 ;                 s  c  o  r  e  : 
 scoremsg:   .byte 19,3 ,15,18,5 ,58,32,0
 ;                 p  r  e s  s     a n  y     k  e y     t  o     s  t  a r  t
